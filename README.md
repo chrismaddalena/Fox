@@ -2,7 +2,7 @@
 
 [![Python Version](https://img.shields.io/badge/Python-3.6-brightgreen.svg)]() [![license](https://img.shields.io/github/license/mashape/apistatus.svg)]()
 
-![Fox](https://github.com/chrismaddalena/fox/raw/master/FoxAndTheHound.png)
+![Fox](https://github.com/chrismaddalena/fox/raw/master/FoxAndTheHound.jpg)
 
 ## What Does Fox Do?
 
