@@ -21,7 +21,8 @@ class UserMetrics(object):
 
     def get_total_users(self, domain, enabled=False):
         """Returns the total number of users in the given domain. All user accounts are returned
-        unless the Enabled flag is set.
+        unless the Enabled flag is set, in which case only accounts with the "Enabled" attribute
+        are returned.
         """
         if enabled:
             query = """
@@ -35,8 +36,7 @@ class UserMetrics(object):
             RETURN COUNT(DISTINCT(totalUsers))
             """ % domain
 
-        with self.neo4j_driver.session() as session:
-            results = session.run(query)
+        results = helpers.execute_query(self.neo4j_driver, query)
 
         for record in results:
             return record[0]
@@ -48,22 +48,20 @@ class UserMetrics(object):
         RETURN COUNT(DISTINCT(totalComputers))
         """ % domain
 
-        with self.neo4j_driver.session() as session:
-            results = session.run(query)
+        results = helpers.execute_query(self.neo4j_driver, query)
 
         for record in results:
             return record[0]
 
     def find_da_spn(self, domain):
-        """Identify users with advanced privileges linked to SPNs."""
+        """Identify Domain Admins linked to SPNs."""
         query = """
         MATCH (u:User {domain:'%s'})-[:MemberOf*1..]->(g:Group {name:'DOMAIN ADMINS@%s'})
         WHERE u.HasSPN = True
         RETURN u.name
         """ % (domain, domain)
 
-        with self.neo4j_driver.session() as session:
-            results = session.run(query)
+        results = helpers.execute_query(self.neo4j_driver, query)
 
         has_spn = []
         for record in results:
@@ -72,15 +70,14 @@ class UserMetrics(object):
         return has_spn
 
     def find_unconstrained_delegation(self, domain):
-        """Identifies computers with unconstrained delegtation enabled on the given domain."""
+        """Identifies computers with unconstrained delegation enabled on the given domain."""
         query = """
-        MATCH (c:Computer)
+        MATCH (c:Computer {domain:'%s'})
         WHERE c.UnconstrainedDelegation = True
         RETURN c.name
-        """
+        """ % domain
 
-        with self.neo4j_driver.session() as session:
-            results = session.run(query)
+        results = helpers.execute_query(self.neo4j_driver, query)
 
         computers = []
         for record in results:
@@ -97,8 +94,7 @@ class UserMetrics(object):
         RETURN u.name,u.PwdLastSet
         """ % domain
 
-        with self.neo4j_driver.session() as session:
-            results = session.run(query)
+        results = helpers.execute_query(self.neo4j_driver, query)
 
         old_passwords = {}
         for record in results:
@@ -111,8 +107,8 @@ class UserMetrics(object):
         return old_passwords
 
     def find_special_users(self, domain):
-        """Attempt to find user accounts contianing special characters at the beginning or end
-        which might signify some sort of special account.
+        """Attempt to find user accounts containing common prefixes or suffixes that often
+        denote accounts with administrator privileges.
         """
         # TODO: This seems like it could be more efficient
         query = """
@@ -121,12 +117,13 @@ class UserMetrics(object):
         or u.name =~ '(?i).*ADMIN_.*' or u.name =~ '(?i).*ADMIN-.*'
         or u.name =~ '(?i).*_ADMIN.*' or u.name =~ '(?i).*-ADMIN.*'
         or u.name =~ '(?i).*ADM_.*' or u.name =~ '(?i).*ADM-.*'
-        or u.name =~ '(?i).*-ADM.*' or u.name =~ '(?i).*-ADM.*'
+        or u.name =~ '(?i).*_ADM.*' or u.name =~ '(?i).*-ADM.*'
+        or u.name =~ '(?i).*_A.*' or u.name =~ '(?i).*-A.*'
+        or u.name =~ '(?i).*A_.*' or u.name =~ '(?i).*A-.*'
         RETURN u.name
         """ % domain
 
-        with self.neo4j_driver.session() as session:
-            results = session.run(query)
+        results = helpers.execute_query(self.neo4j_driver, query)
 
         users = []
         for record in results:
@@ -145,8 +142,7 @@ class UserMetrics(object):
         RETURN n.name,m.name
         """ % (domain, domain)
 
-        with self.neo4j_driver.session() as session:
-            results = session.run(query)
+        results = helpers.execute_query(self.neo4j_driver, query)
 
         users = {}
         for record in results:

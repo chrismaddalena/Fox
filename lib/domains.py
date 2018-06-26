@@ -15,15 +15,31 @@ class DomainData(object):
         # Collect the database info from the config file
         self.neo4j_driver = driver
 
-    def get_all_domains(self):
-        """Fetch and return distinct domains from the BloodHound data set."""
-        query = """
-        MATCH (g:Group)
-        RETURN DISTINCT g.domain
+    def get_all_domains(self, inclusive=False):
+        """Fetch and return distinct domains from the BloodHound data set for which there is data.
+        If a True value is provided for inclusive then all domains are pulled from the dataset for
+        comparison purposes.
         """
+        # We fetch groups and then get the domain property for the group. We do this instead
+        # of MATCHing on domains, or even users, because pulling domains from those objects
+        # may lead to failed queries later due to not enough data about the additional domains.
+        # BloodHound may have users from additional domains via foreign group membership, which
+        # adds those domains to Domains while no other data about that domain is available.
 
-        with self.neo4j_driver.session() as session:
-            results = session.run(query)
+        # Include ALL domains regardless of info available -- useful for comparisons
+        if inclusive:
+            query = """
+            MATCH (d:Domain)
+            RETURN DISTINCT d.name
+            """
+        # Get only domains for which we have data
+        else:
+            query = """
+            MATCH (g:Group)
+            RETURN DISTINCT g.domain
+            """
+
+        results = helpers.execute_query(self.neo4j_driver, query)
 
         domains = []
         for record in results:
@@ -39,8 +55,7 @@ class DomainData(object):
         RETURN COUNT(DISTINCT(pathToDAUsers))
         """ % (domain, domain)
 
-        with self.neo4j_driver.session() as session:
-            results = session.run(query)
+        results = helpers.execute_query(self.neo4j_driver, query)
 
         for record in results:
             return record[0]
@@ -52,15 +67,14 @@ class DomainData(object):
         RETURN toInt(AVG(LENGTH(p))) as avgPathLength
         """ % (domain, domain)
 
-        with self.neo4j_driver.session() as session:
-            results = session.run(query)
+        results = helpers.execute_query(self.neo4j_driver, query)
 
         for record in results:
             return record[0]
 
     def get_systems_with_da(self, domain):
-        """Returns a list of computers that are not Domain Controllers and have a DOmain Admin
-        user logged-in.
+        """Returns a list of computers that are not Domain Controllers and have at least one active
+        session for a Domain Admin user.
         """
         query = """
         MATCH (c2:Computer)-[r3:MemberOf*1..]->(g2:Group {name:UPPER('DOMAIN CONTROLLERS@%s')})
@@ -71,8 +85,7 @@ class DomainData(object):
         ORDER BY c1.name ASC
         """ % (domain, domain)
 
-        with self.neo4j_driver.session() as session:
-            results = session.run(query)
+        results = helpers.execute_query(self.neo4j_driver, query)
 
         computers = []
         for record in results:
@@ -81,15 +94,14 @@ class DomainData(object):
         return computers
 
     def count_local_admins(self, domain):
-        """Discover the number of local admins each computer in the domain has."""
+        """Discover the number of local admins for each computer in the domain."""
         query = """
         MATCH p = (u1:User)-[r:MemberOf|AdminTo*1..]->(c:Computer)
         RETURN c.name as computerName,COUNT(DISTINCT(u1)) AS adminCount
         ORDER BY adminCount DESC
         """
 
-        with self.neo4j_driver.session() as session:
-            results = session.run(query)
+        results = helpers.execute_query(self.neo4j_driver, query)
 
         admin_count = {}
         for record in results:
@@ -103,30 +115,45 @@ class DomainData(object):
         MATCH (c:Computer {domain:'%s'})
         WHERE NOT (c.OperatingSystem = "" or c.OperatingSystem is Null)
         RETURN DISTINCT(c.OperatingSystem) as OperartingSystems,COUNT(c.OperatingSystem) as Total
+        ORDER BY Total DESC
         """ % domain
 
-        with self.neo4j_driver.session() as session:
-            results = session.run(query)
+        results = helpers.execute_query(self.neo4j_driver, query)
 
         operating_systems = {}
         for record in results:
             operating_systems[record[0]] = record[1]
-        
+
         return operating_systems
 
     def get_all_gpos(self, domain):
-        """Get all GPOs for the given domain."""
+        """Get the names of all GPOs for the given domain."""
         query = """
         MATCH (g:GPO {domain:'%s'})
         WHERE NOT (g.name is Null or g.name = "")
         RETURN g.name
         """ % domain
 
-        with self.neo4j_driver.session() as session:
-            results = session.run(query)
+        results = helpers.execute_query(self.neo4j_driver, query)
 
         gpos = []
         for record in results:
             gpos.append(record[0])
         
         return gpos
+
+    def find_blocked_inheritance(self, domain):
+        """Finds Active Directory OUs that block inheritance of group policies."""
+        query = """
+        MATCH (o:OU {domain:'%s'})
+        WHERE o.blocksInheritance = True
+        RETURN o.name
+        """ % domain
+
+        results = helpers.execute_query(self.neo4j_driver, query)
+
+        blocker_ous = []
+        for record in results:
+            blocker_ous.append(record[0])
+        
+        return blocker_ous
